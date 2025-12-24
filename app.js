@@ -15,14 +15,9 @@ window.addEventListener("resize", () => {
 });
 
 // 複数画像のパス
-const imagePaths = [
-  "img/about.jpg",
-  "img/guest_attalk_dai.png",
-  "img/x_post_nami.webp",
-  "img/x_post_kuu.webp",
-];
+const imagePaths = ["img/about.jpg", "img/guest_attalk_dai.png", "img/x_post_nami.webp", "img/x_post_kuu.webp"];
 
-const baseRepeat = 4;
+const baseRepeat = 3;
 let atlasTexture = null;
 
 // 複数画像をテクスチャアトラス（2x2）にまとめる（cover方式：隙間なし）
@@ -160,8 +155,11 @@ const material = new THREE.ShaderMaterial({
       vec2 depthWarp = centered * (1.0 - depthStrength * distFromCenter * 2.0);
       vec2 warpedUV = depthWarp + 0.5;
 
-      // タイリング用のUV
-      vec2 uv = warpedUV * u_repeat + u_offset;
+// タイリング用のUV（段違いで交互に動かす）
+vec2 baseUV = warpedUV * u_repeat;
+float row = floor(baseUV.y + u_offset.y);  // タイルの行番号（スクロール後）
+float direction = 1.0 - 2.0 * mod(row, 2.0);  // 偶数行→1.0、奇数行→-1.0
+vec2 uv = baseUV + vec2(u_offset.x * direction, u_offset.y);
 
       // タイルのインデックス
       vec2 tileIndex = floor(uv);
@@ -296,7 +294,7 @@ canvas.addEventListener("wheel", (e) => {
 // アニメーションループ
 function animate() {
   requestAnimationFrame(animate);
-
+  offset.x += 0.006;
   // 慣性を適用
   if (!isDragging) {
     offset.x += velocity.x;
