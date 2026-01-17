@@ -15,61 +15,84 @@ window.addEventListener("resize", () => {
 });
 
 // 複数画像のパス
-const imagePaths = ["img/about.jpg", "img/guest_attalk_dai.png", "img/x_post_nami.webp", "img/x_post_kuu.webp"];
+const imagePaths = [
+  "img/photo_01.jpg",
+  "img/photo_02.jpg",
+  "img/photo_03.jpg",
+  "img/photo_04.jpg",
+  "img/photo_05.jpg",
+  "img/photo_06.jpg",
+  "img/photo_07.jpg",
+  "img/photo_08.jpg",
+  "img/photo_09.jpg",
+  "img/photo_10.jpg",
+];
 
 // 各画像に対応するリンク先URL（画像と同じ順番）
 const imageURLs = [
-  "https://example.com/about", // img/about.jpg のリンク先
-  "https://example.com/guest", // img/guest_attalk_dai.png のリンク先
-  "https://example.com/nami", // img/x_post_nami.webp のリンク先
-  "https://example.com/kuu", // img/x_post_kuu.webp のリンク先
+  "https://example.com/photo01",
+  "https://example.com/photo02",
+  "https://example.com/photo03",
+  "https://example.com/photo04",
+  "https://example.com/photo05",
+  "https://example.com/photo06",
+  "https://example.com/photo07",
+  "https://example.com/photo08",
+  "https://example.com/photo09",
+  "https://example.com/photo10",
 ];
 
 const baseRepeat = 3;
 let atlasTexture = null;
 
-// 複数画像をテクスチャアトラス（2x2）にまとめる（cover方式：隙間なし）
+// 複数画像をテクスチャアトラス（5x2）にまとめる（cover方式：隙間なし）
+const ATLAS_COLS = 5;
+const ATLAS_ROWS = 2;
+
 function createTextureAtlas(images) {
-  const atlasSize = 1024;
-  const tileSize = atlasSize / 2; // 2x2グリッド
+  const atlasWidth = 2560;  // 512 * 5
+  const atlasHeight = 1024; // 512 * 2
+  const tileWidth = atlasWidth / ATLAS_COLS;
+  const tileHeight = atlasHeight / ATLAS_ROWS;
 
   const atlasCanvas = document.createElement("canvas");
-  atlasCanvas.width = atlasSize;
-  atlasCanvas.height = atlasSize;
+  atlasCanvas.width = atlasWidth;
+  atlasCanvas.height = atlasHeight;
   const ctx = atlasCanvas.getContext("2d");
 
   // 背景を暗い色に
   ctx.fillStyle = "#0d0d12";
-  ctx.fillRect(0, 0, atlasSize, atlasSize);
+  ctx.fillRect(0, 0, atlasWidth, atlasHeight);
 
   // 各画像をcover方式で配置（タイル全体を埋める）
   images.forEach((img, index) => {
-    const col = index % 2;
-    const row = Math.floor(index / 2);
-    const x = col * tileSize;
-    const y = row * tileSize;
+    const col = index % ATLAS_COLS;
+    const row = Math.floor(index / ATLAS_COLS);
+    const x = col * tileWidth;
+    const y = row * tileHeight;
 
     const imgAspect = img.width / img.height;
+    const tileAspect = tileWidth / tileHeight;
 
     // cover方式（タイル全体を埋める、アスペクト比を保持）
     let drawWidth, drawHeight, drawX, drawY;
-    if (imgAspect > 1) {
-      // 横長画像 → 縦を合わせて横をはみ出す
-      drawHeight = tileSize;
-      drawWidth = tileSize * imgAspect;
-      drawX = x - (drawWidth - tileSize) / 2;
+    if (imgAspect > tileAspect) {
+      // 画像がタイルより横長 → 縦を合わせて横をはみ出す
+      drawHeight = tileHeight;
+      drawWidth = tileHeight * imgAspect;
+      drawX = x - (drawWidth - tileWidth) / 2;
       drawY = y;
     } else {
-      // 縦長画像 → 横を合わせて縦をはみ出す
-      drawWidth = tileSize;
-      drawHeight = tileSize / imgAspect;
+      // 画像がタイルより縦長 → 横を合わせて縦をはみ出す
+      drawWidth = tileWidth;
+      drawHeight = tileWidth / imgAspect;
       drawX = x;
-      drawY = y - (drawHeight - tileSize) / 2;
+      drawY = y - (drawHeight - tileHeight) / 2;
     }
 
     ctx.save();
     ctx.beginPath();
-    ctx.rect(x, y, tileSize, tileSize);
+    ctx.rect(x, y, tileWidth, tileHeight);
     ctx.clip();
     ctx.drawImage(img, drawX, drawY, drawWidth, drawHeight);
     ctx.restore();
@@ -129,7 +152,9 @@ const material = new THREE.ShaderMaterial({
     u_repeat: { value: new THREE.Vector2(baseRepeat, baseRepeat) },
     u_gap: { value: 0.0 },
     u_depth: { value: 0.0 },
-    u_imageCount: { value: 4.0 },
+    u_imageCount: { value: 10.0 },
+    u_atlasCols: { value: 5.0 },
+    u_atlasRows: { value: 2.0 },
   },
   vertexShader: `
     varying vec2 v_uv;
@@ -147,6 +172,8 @@ const material = new THREE.ShaderMaterial({
     uniform float u_gap;
     uniform float u_depth;
     uniform float u_imageCount;
+    uniform float u_atlasCols;
+    uniform float u_atlasRows;
 
     void main() {
       // 画面中心からの距離
@@ -178,16 +205,19 @@ const material = new THREE.ShaderMaterial({
       if (isOutside) {
         color = vec4(0.05, 0.05, 0.08, 1.0);
       } else {
-        // テスト：X座標だけで決定（最もシンプル）
-        float indexFloat = mod(tileIndex.x, u_imageCount);
+        // XとY座標を組み合わせて決定（縦横で異なる画像になる）
+        float indexFloat = mod(tileIndex.x + tileIndex.y * u_atlasCols, u_imageCount);
         int imageIndex = int(indexFloat);
 
-        // アトラス内の位置を計算（2x2グリッド）
-        float atlasCol = mod(float(imageIndex), 2.0);
-        float atlasRow = floor(float(imageIndex) / 2.0);
+        // アトラス内の位置を計算（5x2グリッド）
+        float atlasCol = mod(float(imageIndex), u_atlasCols);
+        float atlasRow = floor(float(imageIndex) / u_atlasCols);
 
         // アトラスUVを計算（Y座標を反転）
-        vec2 atlasUV = (vec2(atlasCol, 1.0 - atlasRow) + scaledUV) / 2.0;
+        vec2 atlasUV = vec2(
+          (atlasCol + scaledUV.x) / u_atlasCols,
+          ((u_atlasRows - 1.0 - atlasRow) + scaledUV.y) / u_atlasRows
+        );
 
         color = texture2D(u_texture, atlasUV);
       }
@@ -371,9 +401,9 @@ canvas.addEventListener("click", (e) => {
     return;
   }
 
-  // テスト：X座標だけで決定（最もシンプル）
-  const calcValue = tileIndexX;
-  const imageIndex = ((calcValue % 4) + 4) % 4;
+  // XとY座標を組み合わせて決定（シェーダーと同じ計算）
+  const calcValue = tileIndexX + tileIndexY * 5;
+  const imageIndex = ((calcValue % 10) + 10) % 10;
 
   // デバッグ情報を表示
   console.log("=== クリック情報 ===");
@@ -385,8 +415,8 @@ canvas.addEventListener("click", (e) => {
   console.log("offset:", offset.x.toFixed(4), offset.y.toFixed(4));
   console.log("最終UV:", uv_x.toFixed(4), uv_y.toFixed(4));
   console.log("タイル位置:", tileIndexX, tileIndexY);
-  console.log("計算（X座標のみ）:", `${tileIndexX}`);
-  console.log("最終:", `((${calcValue} % 4) + 4) % 4 = ${imageIndex}`);
+  console.log("計算（X+Y*5）:", `${tileIndexX} + ${tileIndexY} * 5 = ${calcValue}`);
+  console.log("最終:", `((${calcValue} % 10) + 10) % 10 = ${imageIndex}`);
   console.log("画像:", imagePaths[imageIndex]);
   console.log("URL:", imageURLs[imageIndex]);
   console.log("==================");
