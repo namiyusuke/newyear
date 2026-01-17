@@ -17,6 +17,14 @@ window.addEventListener("resize", () => {
 // 複数画像のパス
 const imagePaths = ["img/about.jpg", "img/guest_attalk_dai.png", "img/x_post_nami.webp", "img/x_post_kuu.webp"];
 
+// 各画像に対応するリンク先URL（画像と同じ順番）
+const imageURLs = [
+  "https://example.com/about", // img/about.jpg のリンク先
+  "https://example.com/guest", // img/guest_attalk_dai.png のリンク先
+  "https://example.com/nami", // img/x_post_nami.webp のリンク先
+  "https://example.com/kuu", // img/x_post_kuu.webp のリンク先
+];
+
 const baseRepeat = 3;
 let atlasTexture = null;
 
@@ -140,11 +148,6 @@ const material = new THREE.ShaderMaterial({
     uniform float u_depth;
     uniform float u_imageCount;
 
-    // 疑似乱数生成
-    float random(vec2 st) {
-      return fract(sin(dot(st, vec2(12.9898, 78.233))) * 43758.5453123);
-    }
-
     void main() {
       // 画面中心からの距離
       vec2 centered = v_uv - 0.5;
@@ -155,11 +158,8 @@ const material = new THREE.ShaderMaterial({
       vec2 depthWarp = centered * (1.0 - depthStrength * distFromCenter * 2.0);
       vec2 warpedUV = depthWarp + 0.5;
 
-// タイリング用のUV（段違いで交互に動かす）
-vec2 baseUV = warpedUV * u_repeat;
-float row = floor(baseUV.y + u_offset.y);  // タイルの行番号（スクロール後）
-float direction = 1.0 - 2.0 * mod(row, 2.0);  // 偶数行→1.0、奇数行→-1.0
-vec2 uv = baseUV + vec2(u_offset.x * direction, u_offset.y);
+      // タイリング用のUV
+      vec2 uv = warpedUV * u_repeat + u_offset;
 
       // タイルのインデックス
       vec2 tileIndex = floor(uv);
@@ -178,16 +178,16 @@ vec2 uv = baseUV + vec2(u_offset.x * direction, u_offset.y);
       if (isOutside) {
         color = vec4(0.05, 0.05, 0.08, 1.0);
       } else {
-        // タイルごとにランダムな画像を選択
-        float rand = random(tileIndex);
-        int imageIndex = int(floor(rand * u_imageCount));
+        // テスト：X座標だけで決定（最もシンプル）
+        float indexFloat = mod(tileIndex.x, u_imageCount);
+        int imageIndex = int(indexFloat);
 
         // アトラス内の位置を計算（2x2グリッド）
         float atlasCol = mod(float(imageIndex), 2.0);
         float atlasRow = floor(float(imageIndex) / 2.0);
 
-        // アトラスUVを計算
-        vec2 atlasUV = (vec2(atlasCol, atlasRow) + scaledUV) / 2.0;
+        // アトラスUVを計算（Y座標を反転）
+        vec2 atlasUV = (vec2(atlasCol, 1.0 - atlasRow) + scaledUV) / 2.0;
 
         color = texture2D(u_texture, atlasUV);
       }
@@ -325,3 +325,78 @@ function animate() {
 }
 
 animate();
+
+// クリックでリンクに飛ぶ処理
+canvas.addEventListener("click", (e) => {
+  // クリック位置を0〜1のUV座標に変換
+  const rect = canvas.getBoundingClientRect();
+  const x = (e.clientX - rect.left) / rect.width;
+  const y = 1.0 - (e.clientY - rect.top) / rect.height; // 上下反転
+
+  // 画面中心からの距離（奥行き効果の計算）
+  const centered_x = x - 0.5;
+  const centered_y = y - 0.5;
+  const distFromCenter = Math.sqrt(centered_x * centered_x + centered_y * centered_y);
+
+  // 奥行きワープを適用（シェーダーと同じ）
+  // テスト：奥行きワープを一時的に無効化
+  const depthStrength = 0; // currentDepth * 0.3;
+  const warpFactor = 1.0 - depthStrength * distFromCenter * 2.0;
+  const warpedX = centered_x * warpFactor + 0.5;
+  const warpedY = centered_y * warpFactor + 0.5;
+
+  // リピート倍率を取得
+  const repeatX = material.uniforms.u_repeat.value.x;
+  const repeatY = material.uniforms.u_repeat.value.y;
+
+  // UV座標を計算
+  const uv_x = warpedX * repeatX + offset.x;
+  const uv_y = warpedY * repeatY + offset.y;
+
+  // タイルのインデックス
+  const tileIndexX = Math.floor(uv_x);
+  const tileIndexY = Math.floor(uv_y);
+
+  // タイル内のローカルUV
+  const tileUV_x = uv_x - tileIndexX;
+  const tileUV_y = uv_y - tileIndexY;
+
+  // ギャップチェック（タイルの隙間をクリックした場合は無視）
+  const gap = currentGap * 0.09;
+  const scaledUV_x = (tileUV_x - 0.5) / (1.0 - gap * 2.0) + 0.5;
+  const scaledUV_y = (tileUV_y - 0.5) / (1.0 - gap * 2.0) + 0.5;
+
+  // タイル外（隙間）をクリックした場合は何もしない
+  if (scaledUV_x < 0.0 || scaledUV_x > 1.0 || scaledUV_y < 0.0 || scaledUV_y > 1.0) {
+    return;
+  }
+
+  // テスト：X座標だけで決定（最もシンプル）
+  const calcValue = tileIndexX;
+  const imageIndex = ((calcValue % 4) + 4) % 4;
+
+  // デバッグ情報を表示
+  console.log("=== クリック情報 ===");
+  console.log("クリック座標(画面):", e.clientX.toFixed(0), e.clientY.toFixed(0));
+  console.log("UV座標:", x.toFixed(4), y.toFixed(4));
+  console.log("currentDepth:", currentDepth.toFixed(4));
+  console.log("奥行きワープ後:", warpedX.toFixed(4), warpedY.toFixed(4));
+  console.log("repeat:", repeatX.toFixed(2), repeatY.toFixed(2));
+  console.log("offset:", offset.x.toFixed(4), offset.y.toFixed(4));
+  console.log("最終UV:", uv_x.toFixed(4), uv_y.toFixed(4));
+  console.log("タイル位置:", tileIndexX, tileIndexY);
+  console.log("計算（X座標のみ）:", `${tileIndexX}`);
+  console.log("最終:", `((${calcValue} % 4) + 4) % 4 = ${imageIndex}`);
+  console.log("画像:", imagePaths[imageIndex]);
+  console.log("URL:", imageURLs[imageIndex]);
+  console.log("==================");
+
+  // 対応するURLに飛ぶ
+  if (imageURLs[imageIndex]) {
+    // デバッグ中はコメントアウトして実際には飛ばないようにする
+    // window.location.href = imageURLs[imageIndex];
+    alert(
+      `タイル位置: (${tileIndexX}, ${tileIndexY})\n画像: ${imagePaths[imageIndex]}\nリンク先: ${imageURLs[imageIndex]}\n\n※見えている画像と合っているか確認してください`
+    );
+  }
+});
